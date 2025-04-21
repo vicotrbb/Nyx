@@ -1,0 +1,51 @@
+{
+  "name": "nyx",
+  "version": "0.1.0",
+  "description": "Nyx - Autonomous AI Coding Agent",
+  "main": "dist/index.js",
+  "bin": {
+    "nyx": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "dev": "tsc -w",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "type-check": "tsc --noEmit",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "coding",
+    "autonomous",
+    "cli"
+  ],
+  "author": "Victor Bona",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^22.14.1",
+    "@types/readline-sync": "^1.4.8",
+    "@typescript-eslint/eslint-plugin": "^8.31.0",
+    "@typescript-eslint/parser": "^8.31.0",
+    "eslint": "^9.25.1",
+    "eslint-config-prettier": "^10.1.2",
+    "eslint-plugin-prettier": "^5.2.6",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.31.0"
+  },
+  "dependencies": {
+    "@types/blessed": "^0.1.25",
+    "@types/proper-lockfile": "^4.1.4",
+    "blessed": "^0.1.81",
+    "blessed-contrib": "^4.11.0",
+    "commander": "^13.1.0",
+    "dotenv": "^16.5.0",
+    "openai": "^4.95.1",
+    "proper-lockfile": "^4.1.2",
+    "readline-sync": "^1.4.10"
+  }
+}
