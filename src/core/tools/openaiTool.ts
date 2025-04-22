@@ -1,4 +1,6 @@
 import OpenAI from 'openai';
+import { z } from 'zod';
+import zodToJsonSchema from 'zod-to-json-schema';
 import { NyxConfig } from '../../config/nyxConfig';
 
 let openaiClient: OpenAI | null = null;
@@ -23,24 +25,96 @@ function getClient(apiKey?: string): OpenAI {
 
 export async function chatCompletion(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
-  config: Pick<NyxConfig, 'openaiApiKey' | 'openaiModel' | 'temperature'>
-): Promise<string | null> {
+  config: Pick<NyxConfig, 'openaiApiKey' | 'openaiModel' | 'temperature'>,
+  options?: { responseType?: 'text' }
+): Promise<string | null>;
+export async function chatCompletion<T extends z.ZodTypeAny>(
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  config: Pick<NyxConfig, 'openaiApiKey' | 'openaiModel' | 'temperature'>,
+  options: { responseType: 'json'; schema: T }
+): Promise<z.infer<T> | null>;
+export async function chatCompletion<T extends z.ZodTypeAny>(
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  config: Pick<NyxConfig, 'openaiApiKey' | 'openaiModel' | 'temperature'>,
+  options?: { responseType?: 'text' | 'json'; schema?: T }
+): Promise<string | z.infer<T> | null> {
+  const responseType = options?.responseType ?? 'text';
+  const schema = options?.schema;
+
   try {
     const client = getClient(config.openaiApiKey);
-    const model = config.openaiModel || 'gpt-4';
+    const model =
+      config.openaiModel ||
+      (responseType === 'json' ? 'gpt-4-turbo-preview' : 'gpt-4');
+
     const temperature = config.temperature ?? 0.2;
 
-    const response = await client.chat.completions.create({
-      model: model,
-      messages: messages,
-      temperature: temperature,
-      // max_tokens: config.maxTokens // Add maxTokens if needed
-    });
+    if (responseType === 'json') {
+      if (!schema) {
+        throw new Error(
+          "A Zod schema must be provided when responseType is 'json'."
+        );
+      }
 
-    return response.choices[0]?.message?.content ?? null;
+      const jsonSchema = zodToJsonSchema(schema, 'responseSchema');
+      const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+        {
+          type: 'function',
+          function: {
+            name: 'format_response',
+            description:
+              'Formats the response according to the provided JSON schema.',
+            parameters: jsonSchema,
+          },
+        },
+      ];
+
+      const response = await client.chat.completions.create({
+        model: model,
+        messages: messages,
+        temperature: temperature,
+        tools: tools,
+        tool_choice: {
+          type: 'function',
+          function: { name: 'format_response' },
+        },
+      });
+
+      const toolCall = response.choices[0]?.message?.tool_calls?.[0];
+      const jsonString = toolCall?.function?.arguments;
+
+      if (!jsonString) {
+        return null;
+      }
+
+      try {
+        const parsedJson = JSON.parse(jsonString);
+        const validationResult = schema.safeParse(parsedJson);
+
+        if (validationResult.success) {
+          return validationResult.data;
+        }
+
+        return null;
+      } catch {
+        return null;
+      }
+    } else {
+      const response = await client.chat.completions.create({
+        model: model,
+        messages: messages,
+        temperature: temperature,
+      });
+
+      return response.choices[0]?.message?.content ?? null;
+    }
   } catch (error: any) {
-    throw new Error(`OpenAI API request failed: ${error.message}`);
+    if (error instanceof Error) {
+      throw new Error(`OpenAI API request failed: ${error.message}`);
+    }
+
+    throw new Error(`OpenAI API request failed with unknown error: ${error}`);
   }
 }
 
-// TODO: Add more sophisticated error handling, rate limiting, retries if needed.
+// TODO: Further enhance error handling, consider rate limiting, retries.
