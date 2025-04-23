@@ -7,6 +7,7 @@ import { EventEmitter } from 'events';
 import { Task, TaskStatus } from './agents/task';
 import { PlannerAgent } from './agents/plannerAgent';
 import { WorkerAgent, TaskResult } from './agents/workerAgent';
+import { ToolDispatcher } from './tools/dispatcher';
 
 export interface OrchestratorStats {
   startTime: number;
@@ -32,6 +33,7 @@ export class Orchestrator extends EventEmitter {
   private tasks: TaskGraph | undefined;
   private memory!: SessionMemory;
   private config!: NyxConfig;
+  private toolDispatcher!: ToolDispatcher;
   private lockManager!: LockManager;
   private dashboard: Dashboard | null = null;
   private planner!: PlannerAgent;
@@ -40,12 +42,10 @@ export class Orchestrator extends EventEmitter {
   private stats!: OrchestratorStats;
   private statsUpdateInterval: NodeJS.Timeout | null = null;
 
-  /**
-   * Private constructor to enforce Singleton pattern.
-   */
   private constructor() {
     super();
     this.memory = new SessionMemory();
+    this.toolDispatcher = new ToolDispatcher(this.log.bind(this));
     this.lockManager = new LockManager(this.log.bind(this));
   }
 
@@ -104,8 +104,12 @@ export class Orchestrator extends EventEmitter {
     }
 
     this.objective = objective;
-    this.memory.addLog('objective', { objective });
-    this.planner = new PlannerAgent(this.config, this.log.bind(this));
+    this.memory.addEntry('objective', { objective });
+    this.planner = new PlannerAgent(
+      this.config,
+      this.toolDispatcher,
+      this.log.bind(this)
+    );
 
     this.log(`Processing objective: ${this.objective}`);
     this.log(`Using config: ${JSON.stringify(this.config)}`);
@@ -252,7 +256,7 @@ export class Orchestrator extends EventEmitter {
     message: string,
     level: 'info' | 'error' | 'warn' = 'info'
   ): void {
-    this.memory.addLog('log', { message, level });
+    this.memory.addEntry('log', { message, level });
     this.emit('log', message, level);
   }
 
@@ -356,7 +360,7 @@ export class Orchestrator extends EventEmitter {
         const result: TaskResult = await worker.execute(taskToRun);
         const newStatus: TaskStatus = result.success ? 'completed' : 'failed';
 
-        this.memory.addLog('task_result', { task: taskToRun, result });
+        this.memory.addEntry('task_result', { task: taskToRun, result });
 
         this.log(
           `Task ${taskToRun.id} finished with status: ${newStatus}${result.message ? `: ${result.message}` : ''}`
@@ -402,7 +406,7 @@ export class Orchestrator extends EventEmitter {
         );
 
         this.tasks.markStatus(taskToRun.id, 'failed', { error: error.message });
-        this.memory.addLog('task_result', {
+        this.memory.addEntry('task_result', {
           task: taskToRun,
           result: { success: false, message: error.message },
         });

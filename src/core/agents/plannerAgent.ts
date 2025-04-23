@@ -1,30 +1,43 @@
 import { TaskGraph } from '../taskGraph';
-import * as openaiTool from '../tools/openaiTool';
+import * as openaiTool from '../ai/openai';
 import { NyxConfig } from '../../config/nyxConfig';
 import { Task } from './task';
 import { LoggerFunc } from './workerAgent';
 import { defaultLogger } from '../../utils/logger';
+import { ToolDispatcher } from '../tools/dispatcher';
+import { PLANNING_PROMPT } from '../prompts/planning';
+import { z } from 'zod';
+import { AgentTypes } from './agentTypes';
+
+/**
+ * TODOS:
+ * - Make the planner agent use the prompt from the planning.ts file
+ * - Make the planner return the plan as a JSON object using a zod schema
+ * - Make the planner agent use the tools from the tools.ts file, dispatch it with the dispatcher, and reiterate on it until the plan is done.
+ * - Make the planner also create the tasks for specific agents.
+ *
+ * - Change the orchestrator to execute the agents based on the plan, running them in parallel and in order of dependency based on the task graph.
+ * - Create the new agents for testing, documentation, design and writting and modifying code and etc.
+ * - Create an agent dispatcher, that will dispatch the agents based on the task plan.
+ */
 
 export class PlannerAgent {
   private config: NyxConfig;
-  private log: LoggerFunc;
+  private dispatcher: ToolDispatcher;
+  private logger: LoggerFunc;
 
-  constructor(config: NyxConfig, logger: LoggerFunc = defaultLogger) {
+  constructor(
+    config: NyxConfig,
+    dispatcher: ToolDispatcher,
+    logger: LoggerFunc = defaultLogger
+  ) {
     this.config = config;
-    this.log = logger;
+    this.dispatcher = dispatcher;
+    this.logger = logger;
   }
 
   async generatePlan(objective: string, context?: string): Promise<TaskGraph> {
-    const systemPrompt = `You are an expert software project planning assistant. 
-Break down the user's objective into a series of actionable development tasks. 
-Consider the provided context if available. 
-Output ONLY the plan as a valid JSON array of task objects. 
-Each task object must have the following properties: 
-- 'id': A unique integer ID for the task (start from 1). 
-- 'description': A concise string describing the task. 
-- 'dependencies': An array of integer IDs representing the tasks that must be completed before this task can start. Use an empty array [] for tasks with no dependencies. 
-Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not include any preamble, explanation, or markdown formatting around the JSON.`;
-
+    const systemPrompt = PLANNING_PROMPT;
     const userPrompt = `Objective: ${objective}\n\n${context ? `Context of current project state:\n${context}\n\n` : ''}Generate the JSON task plan:`;
 
     const messages = [
@@ -32,77 +45,52 @@ Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not includ
       { role: 'user' as const, content: userPrompt },
     ];
 
-    const planJsonText = await openaiTool.chatCompletion(messages, {
-      openaiApiKey: this.config.openaiApiKey,
-      openaiModel: this.config.openaiModel,
-      temperature: 0.1,
-    });
+    const plan = await openaiTool.chatCompletion(
+      messages,
+      {
+        openaiApiKey: this.config.openaiApiKey,
+        openaiModel: this.config.openaiModel,
+        temperature: 0.1,
+      },
+      {
+        responseType: 'json',
+        schema: this.getPlanningSchema(),
+      }
+    );
 
-    if (!planJsonText) {
+    if (!plan) {
       throw new Error('PlannerAgent received no response from LLM.');
     }
 
-    this.log('Raw LLM Plan Response:\n' + planJsonText, 'info');
-    return this.parsePlanJson(planJsonText);
+    this.logger(
+      'Raw LLM Plan Response:\n' + JSON.stringify(plan, null, 2),
+      'info'
+    );
+    return this.parsePlan(plan.tasks);
   }
 
-  private parsePlanJson(planJsonText: string): TaskGraph {
-    this.log('Parsing LLM plan JSON...', 'info');
+  private getPlanningSchema() {
+    return z.object({
+      tasks: z.array(
+        z.object({
+          id: z.number(),
+          description: z.string(),
+          dependencies: z.array(z.number()),
+          agent: z.nativeEnum(AgentTypes),
+        })
+      ),
+      done: z.boolean(),
+    });
+  }
+
+  private parsePlan(tasks: any[]): TaskGraph {
+    this.logger('Processing parsed plan items...', 'info');
+
     const taskGraph = new TaskGraph();
-
-    let parsedPlan: any[];
-
-    try {
-      const cleanJsonText = planJsonText.replace(/```json\n|```/g, '').trim();
-      parsedPlan = JSON.parse(cleanJsonText);
-
-      if (!Array.isArray(parsedPlan)) {
-        throw new Error('Parsed JSON is not an array.');
-      }
-    } catch (error: any) {
-      this.log(
-        'Failed to parse LLM response as JSON: ' + error.message,
-        'error'
-      );
-
-      const jsonMatch = planJsonText.match(/\[[\s\S]*?\]/);
-
-      if (jsonMatch && jsonMatch[0]) {
-        this.log('Attempting fallback JSON parsing from regex match.');
-
-        try {
-          parsedPlan = JSON.parse(jsonMatch[0]);
-
-          if (!Array.isArray(parsedPlan)) {
-            throw new Error('Fallback parsed JSON is not an array.');
-          }
-
-          this.log(
-            'Successfully extracted JSON array from fallback regex.',
-            'info'
-          );
-        } catch (fallbackError: any) {
-          this.log(
-            'Fallback JSON parsing also failed: ' + fallbackError.message,
-            'error'
-          );
-
-          throw new Error(
-            `Failed to parse plan JSON from LLM response. Raw response: ${planJsonText}`
-          );
-        }
-      } else {
-        throw new Error(
-          `LLM response was not valid JSON and no JSON array found. Raw response: ${planJsonText}`
-        );
-      }
-    }
-
     const taskMap = new Map<number, Task>();
     const llmIdToTaskId = new Map<number, number>();
-    this.log('Processing parsed plan items...', 'info');
 
-    for (const item of parsedPlan) {
+    for (const item of tasks) {
       if (
         typeof item?.id !== 'number' ||
         item.id < 1 ||
@@ -111,7 +99,7 @@ Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not includ
         item.description.trim() === '' ||
         !Array.isArray(item?.dependencies)
       ) {
-        this.log(
+        this.logger(
           'Invalid task item format found, skipping: ' + JSON.stringify(item),
           'warn'
         );
@@ -120,7 +108,7 @@ Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not includ
       }
 
       if (llmIdToTaskId.has(item.id)) {
-        this.log(
+        this.logger(
           `Duplicate LLM task ID ${item.id} found, skipping duplicate.`,
           'warn'
         );
@@ -132,14 +120,14 @@ Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not includ
       taskMap.set(item.id, newTask);
       llmIdToTaskId.set(item.id, newTask.id);
 
-      this.log(
+      this.logger(
         `Added task: [Internal ID: ${newTask.id}, LLM ID: ${item.id}] Desc: ${newTask.description}`,
         'info'
       );
     }
 
-    this.log('Linking task dependencies...', 'info');
-    for (const item of parsedPlan) {
+    this.logger('Linking task dependencies...', 'info');
+    for (const item of tasks) {
       if (!llmIdToTaskId.has(item.id)) {
         continue;
       }
@@ -150,7 +138,7 @@ Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not includ
         const internalDepIds = item.dependencies
           .map((depLlmId: any): number | undefined => {
             if (typeof depLlmId !== 'number') {
-              this.log(
+              this.logger(
                 `Invalid dependency ID type (${typeof depLlmId}) for task ${item.id}, skipping.`,
                 'warn'
               );
@@ -161,7 +149,7 @@ Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not includ
             const internalDepId = llmIdToTaskId.get(depLlmId);
 
             if (internalDepId === undefined) {
-              this.log(
+              this.logger(
                 `Dependency LLM ID ${depLlmId} not found for task ${item.id}, skipping.`,
                 'warn'
               );
@@ -174,7 +162,7 @@ Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not includ
         if (internalDepIds.length > 0) {
           task.dependsOn = internalDepIds;
 
-          this.log(
+          this.logger(
             `Linked dependencies for task ${task.id}: [${task.dependsOn.join(', ')}]`,
             'info'
           );
@@ -182,13 +170,13 @@ Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not includ
       }
     }
 
-    this.log('Validating task graph for cycles...', 'info');
+    this.logger('Validating task graph for cycles...', 'info');
 
     try {
       this.validateDAG(taskGraph);
-      this.log('Task graph DAG validation successful.', 'info');
+      this.logger('Task graph DAG validation successful.', 'info');
     } catch (error: any) {
-      this.log('DAG Validation Error: ' + error.message, 'error');
+      this.logger('DAG Validation Error: ' + error.message, 'error');
       throw new Error(`Invalid task plan: ${error.message}`);
     }
 
@@ -218,7 +206,7 @@ Ensure the dependencies form a valid Directed Acyclic Graph (DAG). Do not includ
           adj.get(depId)?.push(task.id);
           inDegree.set(task.id, (inDegree.get(task.id) || 0) + 1);
         } else {
-          this.log(
+          this.logger(
             `Task ${task.id} lists dependency ${depId} which does not exist in the graph.`,
             'warn'
           );

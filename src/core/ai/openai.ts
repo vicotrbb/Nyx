@@ -64,7 +64,7 @@ export async function chatCompletion<T extends z.ZodTypeAny>(
             name: 'format_response',
             description:
               'Formats the response according to the provided JSON schema.',
-            parameters: jsonSchema,
+            parameters: jsonSchema.definitions?.responseSchema,
           },
         },
       ];
@@ -116,5 +116,3 @@ export async function chatCompletion<T extends z.ZodTypeAny>(
     throw new Error(`OpenAI API request failed with unknown error: ${error}`);
   }
 }
-
-// TODO: Further enhance error handling, consider rate limiting, retries.

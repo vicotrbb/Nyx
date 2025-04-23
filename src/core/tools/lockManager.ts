@@ -12,7 +12,9 @@ import { defaultLogger } from '../../utils/logger';
 const WORKSPACE_ROOT = process.cwd();
 const LOCK_DIR = path.join(WORKSPACE_ROOT, '.nyx-locks');
 
-async function ensureLockDir(logger: LoggerFunc): Promise<void> {
+async function ensureLockDir(
+  logger: LoggerFunc = defaultLogger
+): Promise<void> {
   try {
     await fs.mkdir(LOCK_DIR, { recursive: true });
   } catch (error: any) {
@@ -25,13 +27,13 @@ async function ensureLockDir(logger: LoggerFunc): Promise<void> {
 
 export class LockManager {
   private activeLocks: Map<string, () => Promise<void>> = new Map();
-  private log: LoggerFunc;
+  private logger: LoggerFunc;
 
-  constructor(logger?: LoggerFunc) {
-    this.log = logger || defaultLogger;
-    ensureLockDir(this.log);
+  constructor(logger: LoggerFunc = defaultLogger) {
+    this.logger = logger;
+    ensureLockDir(this.logger);
 
-    this.log('LockManager initialized.', 'info');
+    this.logger('LockManager initialized.', 'info');
   }
 
   private getLockfilePath(resourcePath: string): string {
@@ -48,12 +50,12 @@ export class LockManager {
 
   async acquireLock(resourcePath: string): Promise<void> {
     const lockfilePath = this.getLockfilePath(resourcePath);
-    this.log(
+    this.logger(
       `Attempting to acquire lock for: ${resourcePath} (-> ${lockfilePath})`
     );
 
     try {
-      await ensureLockDir(this.log);
+      await ensureLockDir(this.logger);
 
       const release = await lockfile.lock(lockfilePath, {
         stale: 15000,
@@ -61,9 +63,9 @@ export class LockManager {
       });
 
       this.activeLocks.set(resourcePath, release);
-      this.log(`Lock acquired for: ${resourcePath}`);
+      this.logger(`Lock acquired for: ${resourcePath}`);
     } catch (error: any) {
-      this.log(
+      this.logger(
         `Failed to acquire lock for ${resourcePath}: ${error.message}`,
         'error'
       );
@@ -80,9 +82,9 @@ export class LockManager {
         await release();
         this.activeLocks.delete(resourcePath);
 
-        this.log(`Lock released for: ${resourcePath}`);
+        this.logger(`Lock released for: ${resourcePath}`);
       } catch (error: any) {
-        this.log(
+        this.logger(
           `Failed to release lock for ${resourcePath}: ${error.message}`,
           'error'
         );
@@ -91,7 +93,7 @@ export class LockManager {
         throw new Error(`Failed to release lock for resource: ${resourcePath}`);
       }
     } else {
-      this.log(
+      this.logger(
         `Attempted to release lock for ${resourcePath}, but no active lock found.`,
         'warn'
       );
@@ -99,7 +101,7 @@ export class LockManager {
   }
 
   async cleanupLocks(): Promise<void> {
-    this.log('Cleaning up any potentially stale locks...', 'info');
-    await ensureLockDir(this.log);
+    this.logger('Cleaning up any potentially stale locks...', 'info');
+    await ensureLockDir(this.logger);
   }
 }

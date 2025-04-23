@@ -1,7 +1,7 @@
 import { Task } from './task';
 import { NyxConfig } from '../../config/nyxConfig';
 import { LockManager } from '../tools/lockManager';
-import * as openaiTool from '../tools/openaiTool';
+import * as openaiTool from '../ai/openai';
 import * as fileTool from '../tools/fileTool';
 import * as shellTool from '../tools/shellTool';
 import path from 'path';
@@ -204,9 +204,12 @@ export class WorkerAgent {
       );
 
       await fileTool.writeFile(
-        finalFilePath,
-        finalContent,
-        this.config.workspaceDir
+        {
+          filePath: finalFilePath,
+          workspaceDir: this.config.workspaceDir,
+          content: finalContent,
+        },
+        this.log
       );
     } else {
       try {
@@ -214,9 +217,12 @@ export class WorkerAgent {
         this.log(`Lock acquired for ${finalFilePath}. Writing file...`, 'info');
 
         await fileTool.writeFile(
-          finalFilePath,
-          finalContent,
-          this.config.workspaceDir
+          {
+            filePath: finalFilePath,
+            workspaceDir: this.config.workspaceDir,
+            content: finalContent,
+          },
+          this.log
         );
       } finally {
         this.log(`Releasing lock for ${finalFilePath}...`, 'info');
@@ -319,7 +325,7 @@ export class WorkerAgent {
 
     const cwd = this.config.workspaceDir || process.cwd();
     this.log(`Executing command: ${command} in ${cwd}`, 'info');
-    const result = await shellTool.runCommand(command, cwd, this.log);
+    const result = await shellTool.runCommand({ command, cwd }, this.log);
 
     this.log(
       `Shell command result - Code: ${result.code}, Stdout: ${result.stdout.substring(0, 100)}..., Stderr: ${result.stderr.substring(0, 100)}...`,
@@ -408,9 +414,11 @@ export class WorkerAgent {
           }
 
           await fileTool.writeFile(
-            resolvedFilePath,
-            block.code,
-            this.config.workspaceDir,
+            {
+              filePath: resolvedFilePath,
+              workspaceDir: this.config.workspaceDir,
+              content: block.code,
+            },
             this.log
           );
 
@@ -470,9 +478,11 @@ export class WorkerAgent {
           }
 
           await fileTool.writeFile(
-            resolvedFilePath,
-            code,
-            this.config.workspaceDir,
+            {
+              filePath: resolvedFilePath,
+              workspaceDir: this.config.workspaceDir,
+              content: code,
+            },
             this.log
           );
 
@@ -530,12 +540,20 @@ export class WorkerAgent {
       );
 
       try {
-        if (await fileTool.fileExists(filePath, this.config.workspaceDir)) {
+        if (
+          await fileTool.fileExists({
+            filePath: filePath,
+            workspaceDir: this.config.workspaceDir,
+          })
+        ) {
           this.log(`Reading context from file: ${filePath}`, 'info');
 
           const fileContent = await fileTool.readFile(
-            filePath,
-            this.config.workspaceDir
+            {
+              filePath: filePath,
+              workspaceDir: this.config.workspaceDir,
+            },
+            this.log
           );
 
           context += `\n--- Content of ${file} ---\n${fileContent.substring(0, this.MAX_FILE_CONTEXT_LENGTH)}${fileContent.length > this.MAX_FILE_CONTEXT_LENGTH ? '... (truncated)' : ''}

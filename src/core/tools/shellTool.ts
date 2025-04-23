@@ -14,11 +14,17 @@ export interface ShellCommandResult {
   error?: Error;
 }
 
+export interface ShellCommandArgs {
+  command: string;
+  cwd?: string;
+}
+
 export async function runCommand(
-  command: string,
-  cwd?: string,
+  args: ShellCommandArgs,
   logger: LoggerFunc = defaultLogger
 ): Promise<ShellCommandResult> {
+  const { command, cwd } = args;
+
   logger(`Executing command: ${command}${cwd ? ' in ' + cwd : ''}`);
 
   try {

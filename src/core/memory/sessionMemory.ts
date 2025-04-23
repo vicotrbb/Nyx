@@ -23,7 +23,7 @@ export class SessionMemory {
    * @param type Type of the log entry.
    * @param data Associated data.
    */
-  addLog(type: MemoryEntry['type'], data: any): void {
+  addEntry(type: MemoryEntry['type'], data: any): void {
     const entry: MemoryEntry = {
       type,
       timestamp: Date.now(),
