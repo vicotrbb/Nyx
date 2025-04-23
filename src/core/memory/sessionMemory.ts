@@ -6,7 +6,7 @@ import { Task } from '../agents/task';
 import { TaskResult } from '../agents/workerAgent';
 
 interface MemoryEntry {
-  type: 'objective' | 'task_result' | 'log';
+  type: 'objective' | 'task_result' | 'tool_result' | 'log';
   timestamp: number;
   data: any;
 }
